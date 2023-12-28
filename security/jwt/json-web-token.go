@@ -15,6 +15,7 @@ type Claims struct {
 }
 
 func CreatingJWT(userName string) (string, error) {
+
 	tokenActionTime := time.Now().Add(time.Duration(lifeTimeJWT) * time.Minute)
 
 	claims := &Claims{
@@ -32,6 +33,7 @@ func CreatingJWT(userName string) (string, error) {
 }
 
 func DemarshJWT(tokenStr string) (string, *jwt.Token, error) {
+
 	claims := &Claims{}
 
 	tkn, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
