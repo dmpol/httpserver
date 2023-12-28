@@ -25,7 +25,7 @@ func Login(c *gin.Context) {
 	var person Person
 
 	if err := c.BindJSON(&person); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error3": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
