@@ -2,12 +2,13 @@ package jwt
 
 import (
 	"github.com/golang-jwt/jwt/v5"
+	"os"
 	"time"
 )
 
 const lifeTimeJWT int = 15
 
-var jwtSecretKey = []byte("my-super-secret-key-12345")
+var jwtSecretKey = []byte(os.Getenv("TOKEN"))
 
 type Claims struct {
 	Username string `json:"username"`

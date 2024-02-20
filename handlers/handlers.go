@@ -2,36 +2,34 @@ package handlers
 
 import (
 	"github.com/gin-gonic/gin"
+	"log"
+	"myhttpserver/db/connection"
 	jwt2 "myhttpserver/security/jwt"
 	"net/http"
 )
 
-type Person struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-var users = map[string]string{
-	"Dmitry":  "12345",
-	"Valerya": "23456",
-	"ccc":     "34567",
-}
-
-func Welcome(c *gin.Context) {
+func Home(c *gin.Context) {
 	c.JSON(http.StatusOK, "Welcome!")
 }
 
 func Login(c *gin.Context) {
-	var person Person
+	var personAuth PersonAuth
 
-	if err := c.BindJSON(&person); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := c.BindJSON(&personAuth); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error Login": err.Error()})
 		return
 	}
 
-	userPassword, ok := users[person.Username]
+	var person PersonWithId
 
-	if !ok || userPassword != person.Password {
+	err := connection.GetConnect().QueryRow("SELECT user_id, user_name, password_hash, email FROM users WHERE user_name = $1", personAuth.Username).
+		Scan(&person.Id, &person.Username, &person.Password, &person.Email)
+	if err != nil {
+		log.Printf("Ошибка запроса к DB: %s", err)
+	}
+
+	err = comparePasswords(person.Password, personAuth.Password)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized"})
 		return
 	}
