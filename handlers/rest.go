@@ -2,48 +2,45 @@ package handlers
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/volatiletech/sqlboiler/v4/boil"
 	"golang.org/x/crypto/bcrypt"
 	"log"
-	"myhttpserver/db/connection"
+	"myhttpserver/db/models"
 	"net/http"
+	"strconv"
 )
 
 func GetPersons(c *gin.Context) {
-
-	rows, err := connection.GetConnect().Query("SELECT user_id, user_name, password_hash, email FROM users")
+	users, err := models.Users().All(c.Request.Context(), boil.GetContextDB())
 	if err != nil {
-		log.Printf("Ошибка запроса: %s", err)
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, users)
+		return
 	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Printf("Ошибка закрытия: %s", err)
-		}
-	}()
-
-	var persons []PersonWithId
-
-	for rows.Next() {
-		var person PersonWithId
-		err := rows.Scan(&person.Id, &person.Username, &person.Password, &person.Email)
-		if err != nil {
-			log.Printf("Ошибка сканирования строки DB: %s", err)
-		}
-		persons = append(persons, person)
-	}
-	c.JSON(http.StatusOK, persons)
+	c.JSON(http.StatusOK, users)
 }
 
 func GetPerson(c *gin.Context) {
 	id := c.Param("id")
-
-	var person PersonWithId
-	err := connection.GetConnect().QueryRow("SELECT user_id, user_name, password_hash, email FROM users WHERE user_id = $1", id).
-		Scan(&person.Id, &person.Username, &person.Password, &person.Email)
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		log.Printf("Ошибка запроса к DB: %s", err)
+		log.Printf("Переданный ID не является числом: %s", err)
+		c.JSON(http.StatusUnprocessableEntity, nil)
+		return
 	}
 
-	c.JSON(http.StatusOK, person)
+	user, err := models.Users(models.UserWhere.UserID.EQ(userID)).One(c.Request.Context(), boil.GetContextDB())
+	if err != nil {
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
+	}
+	if user == nil {
+		log.Printf("User %s не найден", id)
+		c.JSON(http.StatusNotFound, user)
+		return
+	}
+	c.JSON(http.StatusOK, user)
 }
 
 func CreatePerson(c *gin.Context) {
@@ -53,17 +50,18 @@ func CreatePerson(c *gin.Context) {
 		return
 	}
 
-	personHashPassword, err := hashPassword(person.Password)
-	if err != nil {
-		log.Printf("Ошибка хеширования пароля: %s", err)
+	user := models.User{
+		UserName:     person.Username,
+		PasswordHash: person.Password,
+		Email:        person.Email,
 	}
 
-	_, err = connection.GetConnect().Exec("INSERT INTO users (user_name, password_hash, email) VALUES ($1, $2, $3)", person.Username, personHashPassword, person.Email)
-	if err != nil {
-		log.Printf("Ошибка при вставке данных: %s", err)
+	if err := user.Insert(c.Request.Context(), boil.GetContextDB(), boil.Infer()); err != nil {
+		log.Printf("Ошибка создания User: %s", err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
 	}
-
-	c.JSON(http.StatusCreated, person)
+	c.JSON(http.StatusCreated, user)
 }
 
 func UpdatePerson(c *gin.Context) {
@@ -75,28 +73,79 @@ func UpdatePerson(c *gin.Context) {
 		return
 	}
 
-	personHashPassword, err := hashPassword(person.Password)
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		log.Printf("Ошибка хеширования пароля: %s", err)
+		log.Printf("Переданный ID не является числом: %s", err)
+		c.JSON(http.StatusUnprocessableEntity, nil)
+		return
 	}
 
-	_, err = connection.GetConnect().Exec("UPDATE users SET user_name = $1, password_hash = $2, email = $3 WHERE user_id = $4", person.Username, personHashPassword, person.Email, id)
+	user, err := models.Users(models.UserWhere.UserID.EQ(userID)).One(c.Request.Context(), boil.GetContextDB())
 	if err != nil {
-		log.Printf("Ошибка обновления данных: %s", err)
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
+	}
+	if user == nil {
+		log.Printf("User %s не найден", id)
+		c.JSON(http.StatusNotFound, user)
+		return
 	}
 
-	c.JSON(http.StatusOK, person)
+	if person.Username != "" {
+		user.UserName = person.Username
+	}
+	if person.Password != "" {
+		personHashPassword, err := hashPassword(person.Password)
+		if err != nil {
+			log.Printf("Ошибка хеширования пароля: %s", err)
+			c.JSON(http.StatusInternalServerError, user)
+			return
+		}
+
+		user.PasswordHash = personHashPassword
+	}
+	if person.Email != "" {
+		user.Email = person.Email
+	}
+
+	if _, err := user.Update(c.Request.Context(), boil.GetContextDB(), boil.Infer()); err != nil {
+		log.Printf("Ошибка обновления в базе данных: %s", err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
+	}
+	c.JSON(http.StatusOK, user)
 }
 
 func DeletePerson(c *gin.Context) {
 	id := c.Param("id")
 
-	_, err := connection.GetConnect().Exec("DELETE FROM users WHERE user_id = $1", id)
+	userID, err := strconv.Atoi(id)
 	if err != nil {
-		log.Printf("Ошибка удаления данных: %s", err)
+		log.Printf("Переданный ID не является числом: %s", err)
+		c.JSON(http.StatusUnprocessableEntity, nil)
+		return
 	}
 
-	c.String(http.StatusOK, "Person deleted")
+	user, err := models.Users(models.UserWhere.UserID.EQ(userID)).One(c.Request.Context(), boil.GetContextDB())
+	if err != nil {
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
+	}
+	if user == nil {
+		log.Printf("User %s не найден", id)
+		c.JSON(http.StatusNotFound, user)
+		return
+	}
+
+	if _, err := user.Delete(c.Request.Context(), boil.GetContextDB()); err != nil {
+		log.Printf("Ошибка удаления из базы данных: %s", err)
+		c.JSON(http.StatusInternalServerError, user)
+		return
+	}
+
+	c.String(http.StatusOK, "User deleted")
 }
 
 func hashPassword(password string) (string, error) {
@@ -110,5 +159,3 @@ func hashPassword(password string) (string, error) {
 func comparePasswords(hashedPassword, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 }
-
-//"$2a$10$8nNnxb/.jmdwzF3W0Jkskuzxw08P7lROJqUzm1VIogrlVQu2BDG.2"
